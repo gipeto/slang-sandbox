@@ -1,0 +1,1 @@
+add_subdirectory(slangy_simple_compute)
