@@ -32,6 +32,11 @@ include(add_slang_target)
 
 option(BUILD_SHARED_LIBS "Build using shared libraries" OFF)
 
+if(MSVC)
+    add_definitions(-DUNICODE -D_UNICODE)
+endif()
+
+
 find_package(slangy REQUIRED QUIET)
 
-add_subdirectory(playground)
+add_subdirectory(sandbox)

@@ -1,5 +1,8 @@
+import os
+
 from conan import ConanFile
 from conan.tools.cmake import CMake, cmake_layout
+from conan.tools.files import copy
 
 
 class slangSandBoxRecipe(ConanFile):
@@ -19,13 +22,22 @@ class slangSandBoxRecipe(ConanFile):
 
     def requirements(self):
         self.requires("slangy/0.1.0")
-        self.requires("slang/2025.12")
+        self.requires("slang/2025.14.3")
 
     def layout(self):
         cmake_layout(self)
+        self.folders.build = "build"
+
+    def generate(self):
+        for dep in self.dependencies.values():
+            copy(
+                self,
+                "*.dll",
+                dep.cpp_info.bindirs[0],
+                os.path.join(self.build_folder, "install", "bin"),
+            )
 
     def build(self):
         cmake = CMake(self)
         cmake.configure()
         cmake.build()
-
