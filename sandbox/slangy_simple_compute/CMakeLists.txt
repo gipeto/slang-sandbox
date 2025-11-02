@@ -9,10 +9,12 @@ set(SHADER_SOURCES shaders/shader_lib.slang
 # blob written in a std::array<uint8_t> contained in a header file.
 add_slang_target(computeMain FILES ${SHADER_SOURCES} NAMESPACE shaders)
 
-add_executable(runComputeShader runComputeShader.cpp)
+add_executable(runComputeShader runComputeShader.cpp
+                                DebugCallback.hpp
+                                gfx.hpp)
 
 # link the slangy library, and the interface target containing the compiled shaders
-target_link_libraries(runComputeShader slangy::slangy shaders::computeMain)
+target_link_libraries(runComputeShader slangy::slangy slang::gfx shaders::computeMain)
 
 install(TARGETS runComputeShader
         INCLUDES

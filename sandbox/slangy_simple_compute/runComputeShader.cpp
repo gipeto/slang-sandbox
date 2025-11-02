@@ -11,19 +11,18 @@
 #include <iostream>
 #include <vector>
 
-#include <slangy/com/factories.hpp>
-#include <slangy/impl/SlangIRBlob.hpp>
+#include <slangy/com/helpers.hpp>
 #include <slangy/utils/DiagnosticLogger.hpp>
-#include <slangy/utils/results.hpp>
+#include <slangy/utils/SlangBlob.hpp>
+
+#include "DebugCallback.hpp"
+#include "gfx.hpp"
 
 namespace
 {
 
 using namespace slang;
-using namespace slangy::utils;
-using namespace slangy::com;
-using namespace slangy::impl;
-using namespace slangy::api;
+using namespace slangy;
 
 ComPtr<gfx::IPipelineState> makePipelineStateFromShader(const ComPtr<gfx::IDevice>& device,
                                                         const ComPtr<IComponentType>& slangProgram)
@@ -34,13 +33,13 @@ ComPtr<gfx::IPipelineState> makePipelineStateFromShader(const ComPtr<gfx::IDevic
     ComPtr<gfx::IShaderProgram> shaderProgram;
     gfx::IShaderProgram::Desc programDesc = {};
     programDesc.slangGlobalScope = slangProgram.get();
-    throw_if_error(device->createProgram(programDesc, shaderProgram.getAddressOf()));
+    throwIfError(device->createProgram(programDesc, shaderProgram.put()));
 
     // Create a compute pipeline state from `shaderProgram`.
     gfx::ComputePipelineStateDesc pipelineDesc = {};
     pipelineDesc.program = shaderProgram.get();
     ComPtr<gfx::IPipelineState> pipelineState;
-    throw_if_error(device->createComputePipelineState(pipelineDesc, pipelineState.getAddressOf()));
+    throwIfError(device->createComputePipelineState(pipelineDesc, pipelineState.put()));
     return pipelineState;
 }
 
@@ -51,7 +50,7 @@ int main(int argc, char* argv[])
     try
     {
         // Compile shaders
-        auto globalSession = value_or_throw(makeGlobalSession);
+        auto globalSession = valueOrThrow(makeGlobalSession());
 
         SessionDesc sDesc{};
         TargetDesc td{};
@@ -61,10 +60,10 @@ int main(int argc, char* argv[])
         sDesc.targets = &td;
         sDesc.targetCount = 1;
 
-        auto session = value_or_throw(makeSession, globalSession, sDesc);
+        auto session = valueOrThrow(makeSession(globalSession, sDesc));
 
         // load the pre-compiled shader_lib module defined in shader_lib.h
-        auto blob = makeFromImpl<IBlob, SlangIRBlob>(shaders::SHADER_LIB_SLANG_MODULE);
+        auto blob = makeFromImpl<IBlob, SlangBlob>(shaders::SHADER_LIB_SLANG_MODULE);
 
         ComPtr<IModule> libModule;
         libModule.attach(session->loadModuleFromIRBlob("shader_lib", "", blob.get(), DLog("Load shader_lib module")()));
@@ -78,7 +77,7 @@ int main(int argc, char* argv[])
         std::cout << "shader_lib module loaded" << std::endl;
 
         // load the pre-compiled shader_main module defined in shader_main.h
-        auto mainBlob = makeFromImpl<IBlob, SlangIRBlob>(shaders::SHADER_MAIN_SLANG_MODULE);
+        auto mainBlob = makeFromImpl<IBlob, SlangBlob>(shaders::SHADER_MAIN_SLANG_MODULE);
 
         ComPtr<IModule> mainModule;
         mainModule.attach(
@@ -94,7 +93,7 @@ int main(int argc, char* argv[])
 
         // Compose the modules and entry points.
         ComPtr<slang::IEntryPoint> computeEntryPoint;
-        throw_if_error(mainModule->findEntryPointByName("computeMain", computeEntryPoint.getAddressOf()));
+        slangy::throwIfError(mainModule->findEntryPointByName("computeMain", computeEntryPoint.put()));
 
         std::cout << "shader_main computeMain entry point found" << std::endl;
 
@@ -104,28 +103,27 @@ int main(int argc, char* argv[])
         componentTypes.push_back(libModule.get());
 
         ComPtr<slang::IComponentType> composedProgram;
-        throw_if_error(session->createCompositeComponentType(componentTypes.data(), componentTypes.size(),
-                                                             composedProgram.getAddressOf(),
-                                                             DLog("Create composite component")()));
+        slangy::throwIfError(session->createCompositeComponentType(
+            componentTypes.data(), componentTypes.size(), composedProgram.put(), DLog("Create composite component")()));
 
         // Link the composed program
         ComPtr<slang::IComponentType> linkedProgram;
-        throw_if_error(composedProgram->link(linkedProgram.getAddressOf(), DLog("Link program")()));
+        slangy::throwIfError(composedProgram->link(linkedProgram.put(), DLog("Link program")()));
         std::cout << "Composite program created and linked" << std::endl;
 
         // Execute the shader
-        slangy::gfx::DebugCallback debugCall;
-        auto device = value_or_throw(slangy::gfx::makeDevice, ::gfx::IDevice::Desc{}, &debugCall);
-        auto commandQueue = value_or_throw(slangy::gfx::makeCommandQueue, device,
-                                           ::gfx::ICommandQueue::Desc{::gfx::ICommandQueue::QueueType::Graphics});
+        gfx::utils::DebugCallback debugCall;
+        auto device = gfx::utils::makeDevice(::gfx::IDevice::Desc{}, &debugCall);
+        auto commandQueue =
+            gfx::utils::makeCommandQueue(device, ::gfx::ICommandQueue::Desc{::gfx::ICommandQueue::QueueType::Graphics});
 
         gfx::ITransientResourceHeap::Desc trDesc = {};
         trDesc.constantBufferSize = 4096;
 
-        auto transientResource = value_or_throw(slangy::gfx::makeTransientResourceHeap, device, trDesc);
+        auto transientResource = gfx::utils::makeTransientResourceHeap(device, trDesc);
 
         ComPtr<gfx::ICommandBuffer> commandBuffer;
-        throw_if_error(transientResource->createCommandBuffer(commandBuffer.getAddressOf()));
+        slangy::throwIfError(transientResource->createCommandBuffer(commandBuffer.put()));
 
         /// Map buffer data to buffer resource
         std::array<int, 4> bufferData = {1, 2, 3, 4};
@@ -137,8 +135,8 @@ int main(int argc, char* argv[])
         bufferDesc.allowedStates = gfx::ResourceStateSet(gfx::ResourceState::UnorderedAccess);
 
         ComPtr<gfx::IBufferResource> bufferResource;
-        throw_if_error(device->createBufferResource(bufferDesc, reinterpret_cast<void*>(bufferData.data()),
-                                                    bufferResource.getAddressOf()));
+        slangy::throwIfError(
+            device->createBufferResource(bufferDesc, reinterpret_cast<void*>(bufferData.data()), bufferResource.put()));
 
         auto pipelineState = makePipelineStateFromShader(device, linkedProgram);
 
@@ -149,7 +147,7 @@ int main(int argc, char* argv[])
         }
 
         ComPtr<gfx::IComputeCommandEncoder> encoder;
-        commandBuffer->encodeComputeCommands(encoder.getAddressOf());
+        commandBuffer->encodeComputeCommands(encoder.put());
 
         if (!encoder)
         {
@@ -168,12 +166,11 @@ int main(int argc, char* argv[])
         ComPtr<gfx::IResourceView> bufferResourceView;
         gfx::IResourceView::Desc bwDesc = {};
         bwDesc.type = gfx::IResourceView::Type::UnorderedAccess;
-        throw_if_error(
-            device->createBufferView(bufferResource.get(), nullptr, bwDesc, bufferResourceView.getAddressOf()));
+        slangy::throwIfError(device->createBufferView(bufferResource.get(), nullptr, bwDesc, bufferResourceView.put()));
 
-        throw_if_error(rootObject->setResource(gfx::ShaderOffset{0, 0, 0}, bufferResourceView.get()));
+        slangy::throwIfError(rootObject->setResource(gfx::ShaderOffset{0, 0, 0}, bufferResourceView.get()));
 
-        throw_if_error(encoder->dispatchCompute(4, 1, 1));
+        slangy::throwIfError(encoder->dispatchCompute(4, 1, 1));
         encoder->endEncoding();
         commandBuffer->close();
 
@@ -182,8 +179,8 @@ int main(int argc, char* argv[])
         commandQueue->waitOnHost();
 
         ComPtr<ISlangBlob> resultBlob;
-        throw_if_error(device->readBufferResource(bufferResource.get(), 0, bufferData.size() * sizeof(int),
-                                                  resultBlob.getAddressOf()));
+        slangy::throwIfError(
+            device->readBufferResource(bufferResource.get(), 0, bufferData.size() * sizeof(int), resultBlob.put()));
 
         std::cout << "Compute shader results: ";
         auto shaderResults = reinterpret_cast<const int*>(resultBlob->getBufferPointer());

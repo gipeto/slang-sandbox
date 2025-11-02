@@ -5,9 +5,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
-#define WINRT_LEAN_AND_MEAN
-#include <winrt/base.h>
-
 #if defined(min)
 #undef min
 #endif

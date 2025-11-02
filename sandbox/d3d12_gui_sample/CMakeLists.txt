@@ -8,7 +8,7 @@ set(SHADER_SOURCES shaders/vertex_shader.slang shaders/pixel_shader.slang)
 # blob written in a std::array<uint8_t> contained in a header file.
 add_slang_target(guiSampleShaders FILES ${SHADER_SOURCES} NAMESPACE shaders)
 
-add_executable(guiSample guiSample.cpp d3dwin.h slangCompile.h d3dPso.h)
+add_executable(guiSample guiSample.cpp d3dwin.h d3dPso.h)
 
 # link the slangy library, and the interface target containing the compiled shaders
 target_link_libraries(guiSample slangy::slangy d3d12 dxgi d3dcompiler dxcompiler shaders::guiSampleShaders)

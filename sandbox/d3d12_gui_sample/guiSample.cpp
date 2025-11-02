@@ -1,17 +1,21 @@
 
 #include "d3dPso.h"
 #include "d3dwin.h"
-#include "slangCompile.h"
+
+#include <d3dcompiler.h>
 
 #include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <ranges>
 
+#include <slangy/error_handling.hpp>
+#include <slangy/slangy.hpp>
+
 #include <pixel_shader.h>
 #include <vertex_shader.h>
 
-using namespace winrt;
+using namespace slangy;
 using namespace DirectX;
 
 float t{};
@@ -20,7 +24,7 @@ std::array clearColor = {0.4f, 0.6f, 0.9f, 1.0f};
 
 struct DescriptorHeap
 {
-    com_ptr<ID3D12DescriptorHeap> rtvDescriptorHeap;
+    ComPtr<ID3D12DescriptorHeap> rtvDescriptorHeap;
     std::uint32_t descriptorSize{};
 };
 
@@ -29,27 +33,27 @@ struct D3DResources
     static constexpr size_t BACK_BUFFER_CNT{3};
     size_t currentBufferIdx{};
 
-    com_ptr<ID3D12Device> device;
+    ComPtr<ID3D12Device> device;
 
-    com_ptr<ID3D12CommandQueue> commandQueue;
-    com_ptr<ID3D12GraphicsCommandList> commandList;
-    std::array<com_ptr<ID3D12CommandAllocator>, BACK_BUFFER_CNT> commandAllocators;
+    ComPtr<ID3D12CommandQueue> commandQueue;
+    ComPtr<ID3D12GraphicsCommandList> commandList;
+    std::array<ComPtr<ID3D12CommandAllocator>, BACK_BUFFER_CNT> commandAllocators;
 
-    com_ptr<IDXGISwapChain4> swapChain;
+    ComPtr<IDXGISwapChain4> swapChain;
 
     DescriptorHeap rtvHeap;
-    std::array<com_ptr<ID3D12Resource>, BACK_BUFFER_CNT> backBuffers;
+    std::array<ComPtr<ID3D12Resource>, BACK_BUFFER_CNT> backBuffers;
 
     //  DescriptorHeap dsvHeap;
-    //  com_ptr<ID3D12Resource> depthBuffer;
+    //  ComPtr<ID3D12Resource> depthBuffer;
 
-    com_ptr<ID3D12Fence> fence;
+    ComPtr<ID3D12Fence> fence;
     std::array<std::uint64_t, BACK_BUFFER_CNT> frameFenceValues;
     std::uint64_t fenceValue{};
     HANDLE fenceEvent;
 
-    com_ptr<ID3D12RootSignature> rootSignature;
-    com_ptr<ID3D12PipelineState> pipelineState;
+    ComPtr<ID3D12RootSignature> rootSignature;
+    ComPtr<ID3D12PipelineState> pipelineState;
 
     // Data to render
 
@@ -66,21 +70,6 @@ struct DisplayOptions
     bool readyToDraw{false};
 };
 
-template <typename Interface, typename Fun, typename... Args>
-winrt::com_ptr<Interface> asComPtr(Fun&& fun, Args&&... args)
-{
-    winrt::com_ptr<Interface> result;
-    fun(std::forward<Args>(args)..., __uuidof(result), result.put_void());
-    return result;
-}
-
-template <auto memberFunctionPtr, typename T>
-auto memberFun(T&& obj)
-{
-    return [&obj](auto&&... args)
-    { return (std::forward<T>(obj).*memberFunctionPtr)(std::forward<decltype(args)>(args)...); };
-}
-
 void enableDebugLayer()
 {
     auto debugInterface = asComPtr<ID3D12Debug>(D3D12GetDebugInterface);
@@ -92,7 +81,7 @@ void enableDebugLayer()
     debugInterface->EnableDebugLayer();
 }
 
-com_ptr<IDXGIFactory6> makeDxgiFactory(bool debug = false)
+ComPtr<IDXGIFactory6> makeDxgiFactory(bool debug = false)
 {
     std::uint32_t flags = debug ? DXGI_CREATE_FACTORY_DEBUG : 0;
     auto dxgiFactory = asComPtr<IDXGIFactory6>(CreateDXGIFactory2, flags);
@@ -105,11 +94,11 @@ com_ptr<IDXGIFactory6> makeDxgiFactory(bool debug = false)
     return dxgiFactory;
 }
 
-com_ptr<IDXGIAdapter4> getAdapter(bool debug = false)
+ComPtr<IDXGIAdapter4> getAdapter(bool debug = false)
 {
     auto dxgiFactory = makeDxgiFactory(debug);
 
-    com_ptr<IDXGIAdapter4> dxgiAdapter;
+    ComPtr<IDXGIAdapter4> dxgiAdapter;
 
     std::uint32_t adapterIdx{};
     while (true)
@@ -139,7 +128,7 @@ com_ptr<IDXGIAdapter4> getAdapter(bool debug = false)
     return dxgiAdapter;
 }
 
-com_ptr<ID3D12Device> makeDevice(const com_ptr<IDXGIAdapter4>& adapter, bool debug = false)
+ComPtr<ID3D12Device> makeDevice(const ComPtr<IDXGIAdapter4>& adapter, bool debug = false)
 {
     auto device = asComPtr<ID3D12Device>(D3D12CreateDevice, adapter.get(), D3D_FEATURE_LEVEL::D3D_FEATURE_LEVEL_11_0);
     if (!device)
@@ -152,9 +141,7 @@ com_ptr<ID3D12Device> makeDevice(const com_ptr<IDXGIAdapter4>& adapter, bool deb
         return device;
     }
 
-    com_ptr<ID3D12InfoQueue> pInfoQueue;
-    device.try_as(pInfoQueue);
-    if (device.try_as(pInfoQueue))
+    if (auto pInfoQueue = device.as<ID3D12InfoQueue>())
     {
         pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
         pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
@@ -188,14 +175,14 @@ com_ptr<ID3D12Device> makeDevice(const com_ptr<IDXGIAdapter4>& adapter, bool deb
     return device;
 }
 
-com_ptr<ID3D12CommandQueue> makeCommandQueue(const com_ptr<ID3D12Device>& device, D3D12_COMMAND_LIST_TYPE type)
+ComPtr<ID3D12CommandQueue> makeCommandQueue(const ComPtr<ID3D12Device>& device, D3D12_COMMAND_LIST_TYPE type)
 {
     D3D12_COMMAND_QUEUE_DESC desc{};
     desc.Type = type;
     desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
     desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
 
-    auto commandQueue = asComPtr<ID3D12CommandQueue>(memberFun<&ID3D12Device::CreateCommandQueue>(*device), &desc);
+    auto commandQueue = asComPtr<ID3D12CommandQueue, &ID3D12Device::CreateCommandQueue>(*device, &desc);
 
     if (!commandQueue)
     {
@@ -219,8 +206,8 @@ bool tearingSupported()
     return tearingSupported != 0;
 }
 
-com_ptr<IDXGISwapChain4> makeSwapChain(HWND hwnd, const com_ptr<ID3D12CommandQueue>& cmdQueue,
-                                       std::uint32_t bufferCount, bool tearingSupported, bool debug = false)
+ComPtr<IDXGISwapChain4> makeSwapChain(HWND hwnd, const ComPtr<ID3D12CommandQueue>& cmdQueue, std::uint32_t bufferCount,
+                                      bool tearingSupported, bool debug = false)
 {
     auto dxgiFactory = makeDxgiFactory(debug);
 
@@ -234,7 +221,7 @@ com_ptr<IDXGISwapChain4> makeSwapChain(HWND hwnd, const com_ptr<ID3D12CommandQue
     desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
     desc.Flags = tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
-    com_ptr<IDXGISwapChain1> swapChain;
+    ComPtr<IDXGISwapChain1> swapChain;
     if (S_OK != dxgiFactory->CreateSwapChainForHwnd(cmdQueue.get(), hwnd, &desc, nullptr, nullptr, swapChain.put()))
     {
         throw std::runtime_error("Failed to create swap chain");
@@ -248,13 +235,13 @@ com_ptr<IDXGISwapChain4> makeSwapChain(HWND hwnd, const com_ptr<ID3D12CommandQue
     return swapChain.as<IDXGISwapChain4>();
 }
 
-DescriptorHeap makeDescriptorHeap(const com_ptr<ID3D12Device>& device, D3D12_DESCRIPTOR_HEAP_TYPE type,
+DescriptorHeap makeDescriptorHeap(const ComPtr<ID3D12Device>& device, D3D12_DESCRIPTOR_HEAP_TYPE type,
                                   std::uint32_t descriptorsCount)
 {
     D3D12_DESCRIPTOR_HEAP_DESC desc{};
     desc.NumDescriptors = descriptorsCount;
     desc.Type = type;
-    if (auto dheap = asComPtr<ID3D12DescriptorHeap>(memberFun<&ID3D12Device::CreateDescriptorHeap>(*device), &desc))
+    if (auto dheap = asComPtr<ID3D12DescriptorHeap, &ID3D12Device::CreateDescriptorHeap>(*device, &desc))
     {
         return {std::move(dheap), device->GetDescriptorHandleIncrementSize(type)};
     }
@@ -262,8 +249,8 @@ DescriptorHeap makeDescriptorHeap(const com_ptr<ID3D12Device>& device, D3D12_DES
     throw std::runtime_error("Failed to create descriptor heap");
 }
 
-com_ptr<ID3D12Resource> makeBufferResource(const com_ptr<ID3D12Device>& device, size_t byteSize,
-                                           D3D12_HEAP_TYPE heapType, D3D12_RESOURCE_STATES resourceStates)
+ComPtr<ID3D12Resource> makeBufferResource(const ComPtr<ID3D12Device>& device, size_t byteSize, D3D12_HEAP_TYPE heapType,
+                                          D3D12_RESOURCE_STATES resourceStates)
 {
     D3D12_HEAP_PROPERTIES heapProperties{};
     heapProperties.Type = heapType;
@@ -284,8 +271,8 @@ com_ptr<ID3D12Resource> makeBufferResource(const com_ptr<ID3D12Device>& device, 
     desc.SampleDesc.Quality = 0;
     desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-    return asComPtr<ID3D12Resource>(memberFun<&ID3D12Device::CreateCommittedResource>(*device), &heapProperties,
-                                    D3D12_HEAP_FLAG_NONE, &desc, resourceStates, nullptr);
+    return asComPtr<ID3D12Resource, &ID3D12Device::CreateCommittedResource>(
+        *device, &heapProperties, D3D12_HEAP_FLAG_NONE, &desc, resourceStates, nullptr);
 }
 
 void updateRenderTargetViews(D3DResources& resources)
@@ -294,7 +281,7 @@ void updateRenderTargetViews(D3DResources& resources)
 
     for (std::uint32_t i = 0; i < resources.BACK_BUFFER_CNT; ++i)
     {
-        auto backBuffer = asComPtr<ID3D12Resource>(memberFun<&IDXGISwapChain4::GetBuffer>(*resources.swapChain), i);
+        auto backBuffer = asComPtr<ID3D12Resource, &IDXGISwapChain4::GetBuffer>(*resources.swapChain, i);
         if (!backBuffer)
         {
             throw std::runtime_error("Failed to get back buffer");
@@ -306,11 +293,10 @@ void updateRenderTargetViews(D3DResources& resources)
     }
 }
 
-com_ptr<ID3D12CommandAllocator> makeCommandAllocator(const com_ptr<ID3D12Device>& device,
-                                                     D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT)
+ComPtr<ID3D12CommandAllocator> makeCommandAllocator(const ComPtr<ID3D12Device>& device,
+                                                    D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT)
 {
-    auto cmdAllocator =
-        asComPtr<ID3D12CommandAllocator>(memberFun<&ID3D12Device::CreateCommandAllocator>(*device), type);
+    auto cmdAllocator = asComPtr<ID3D12CommandAllocator, &ID3D12Device::CreateCommandAllocator>(*device, type);
     if (!cmdAllocator)
     {
         throw std::runtime_error("Failed to create command allocator");
@@ -319,11 +305,11 @@ com_ptr<ID3D12CommandAllocator> makeCommandAllocator(const com_ptr<ID3D12Device>
     return cmdAllocator;
 }
 
-com_ptr<ID3D12Fence> makeFence(const com_ptr<ID3D12Device>& device,
-                               D3D12_FENCE_FLAGS flags = D3D12_FENCE_FLAGS::D3D12_FENCE_FLAG_NONE,
-                               std::uint64_t initValue = 0)
+ComPtr<ID3D12Fence> makeFence(const ComPtr<ID3D12Device>& device,
+                              D3D12_FENCE_FLAGS flags = D3D12_FENCE_FLAGS::D3D12_FENCE_FLAG_NONE,
+                              std::uint64_t initValue = 0)
 {
-    auto fence = asComPtr<ID3D12Fence>(memberFun<&ID3D12Device::CreateFence>(*device), initValue, flags);
+    auto fence = asComPtr<ID3D12Fence, &ID3D12Device::CreateFence>(*device, initValue, flags);
     if (!fence)
     {
         throw std::runtime_error("Failed to create fece");
@@ -332,8 +318,7 @@ com_ptr<ID3D12Fence> makeFence(const com_ptr<ID3D12Device>& device,
     return fence;
 }
 
-std::uint64_t signalAndUpdate(com_ptr<ID3D12CommandQueue> cmdQueue, com_ptr<ID3D12Fence> fence,
-                              std::uint64_t& fenceValue)
+std::uint64_t signalAndUpdate(ComPtr<ID3D12CommandQueue> cmdQueue, ComPtr<ID3D12Fence> fence, std::uint64_t& fenceValue)
 {
     const auto val = ++fenceValue;
 
@@ -345,7 +330,7 @@ std::uint64_t signalAndUpdate(com_ptr<ID3D12CommandQueue> cmdQueue, com_ptr<ID3D
     return val;
 }
 
-void waitForFence(com_ptr<ID3D12Fence> fence, std::uint64_t fenceValue, HANDLE fenceEvent,
+void waitForFence(ComPtr<ID3D12Fence> fence, std::uint64_t fenceValue, HANDLE fenceEvent,
                   std::chrono::milliseconds duration = std::chrono::milliseconds::max())
 {
     if (fence->GetCompletedValue() < fenceValue)
@@ -358,7 +343,7 @@ void waitForFence(com_ptr<ID3D12Fence> fence, std::uint64_t fenceValue, HANDLE f
     }
 }
 
-void flushQueue(com_ptr<ID3D12CommandQueue> cmdQueue, com_ptr<ID3D12Fence> fence, std::uint64_t& fenceValue,
+void flushQueue(ComPtr<ID3D12CommandQueue> cmdQueue, ComPtr<ID3D12Fence> fence, std::uint64_t& fenceValue,
                 HANDLE fenceEvent)
 {
     auto waitValue = signalAndUpdate(cmdQueue, fence, fenceValue);
@@ -620,9 +605,9 @@ int WINAPI wWinMain(HINSTANCE module, HINSTANCE, PWSTR pCmdLine, int nCmdShow)
                 makeCommandAllocator(app.d3dRes.device, D3D12_COMMAND_LIST_TYPE::D3D12_COMMAND_LIST_TYPE_DIRECT);
         }
 
-        app.d3dRes.commandList = asComPtr<ID3D12GraphicsCommandList>(
-            memberFun<&ID3D12Device::CreateCommandList>(*app.d3dRes.device), 0,
-            D3D12_COMMAND_LIST_TYPE::D3D12_COMMAND_LIST_TYPE_DIRECT, app.d3dRes.commandAllocators[0].get(), nullptr);
+        app.d3dRes.commandList = asComPtr<ID3D12GraphicsCommandList, &ID3D12Device::CreateCommandList>(
+            *app.d3dRes.device, 0, D3D12_COMMAND_LIST_TYPE::D3D12_COMMAND_LIST_TYPE_DIRECT,
+            app.d3dRes.commandAllocators[0].get(), nullptr);
 
         if (!app.d3dRes.commandList)
         {
@@ -636,15 +621,36 @@ int WINAPI wWinMain(HINSTANCE module, HINSTANCE, PWSTR pCmdLine, int nCmdShow)
         app.d3dRes.fence = makeFence(app.d3dRes.device);
 
         // Setup shaders pipeline
-        com_ptr<ID3DBlob> vertexShader;
-        com_ptr<ID3DBlob> pixelShader;
+        ComPtr<ID3DBlob> vertexShader;
+        ComPtr<ID3DBlob> pixelShader;
 
         {
-            auto globalSession = slangy::utils::value_or_throw(slangy::api::makeGlobalSession);
-            vertexShader =
-                buildShader(globalSession, "vertex_shader", "vertexMain", shaders::VERTEX_SHADER_SLANG_MODULE);
+            auto globalSession = slangy::valueOrThrow(makeGlobalSession());
+            slang::SessionDesc sd{};
+            slang::TargetDesc td{};
+            td.format = SLANG_DXIL;
+            sd.targetCount = 1;
+            sd.targets = &td;
+            td.profile = globalSession->findProfile("sm_6_3");
 
-            pixelShader = buildShader(globalSession, "pixel_shader", "pixelMain", shaders::PIXEL_SHADER_SLANG_MODULE);
+            auto asID3DBlob = [](const std::vector<std::byte>& shaderProgram)
+            {
+                ComPtr<ID3DBlob> result;
+                if (S_OK != D3DCreateBlob(shaderProgram.size(), result.put()))
+                {
+                    throw std::runtime_error("Failed to create D3DBlob");
+                }
+                std::copy_n(reinterpret_cast<const char*>(shaderProgram.data()), shaderProgram.size(),
+                            reinterpret_cast<char*>(result->GetBufferPointer()));
+                return result;
+            };
+
+            vertexShader = asID3DBlob(slangy::valueOrThrow(
+                buildShaderProgram(sd, globalSession, std::string("vertex_shader"), std::string("vertexMain"),
+                                   shaders::VERTEX_SHADER_SLANG_MODULE))[0]);
+
+            pixelShader = asID3DBlob(slangy::valueOrThrow(buildShaderProgram(
+                sd, globalSession, "pixel_shader", "pixelMain", shaders::PIXEL_SHADER_SLANG_MODULE))[0]);
         }
 
         if (vertexShader)
@@ -674,8 +680,8 @@ int WINAPI wWinMain(HINSTANCE module, HINSTANCE, PWSTR pCmdLine, int nCmdShow)
             XMFLOAT3 Color;
         };
 
-        auto uploadBuffer = [](D3DResources& d3dRes, const com_ptr<ID3D12Resource>& sourceBuffer,
-                               const com_ptr<ID3D12Resource>& destBuffer)
+        auto uploadBuffer = [](D3DResources& d3dRes, const ComPtr<ID3D12Resource>& sourceBuffer,
+                               const ComPtr<ID3D12Resource>& destBuffer)
         {
             // Reuse the swap chain command list and allocator.
             auto& currentBufferIdx = d3dRes.currentBufferIdx;
@@ -727,7 +733,7 @@ int WINAPI wWinMain(HINSTANCE module, HINSTANCE, PWSTR pCmdLine, int nCmdShow)
             waitForFence(d3dRes.fence, d3dRes.fenceValue, d3dRes.fenceEvent);
         };
 
-        com_ptr<ID3D12Resource> vertexBuffer;
+        ComPtr<ID3D12Resource> vertexBuffer;
         {
             constexpr std::array vertices = {Vertex{XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, 0.0f)},  // 0
                                              Vertex{XMFLOAT3(-1.0f, 1.0f, -1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f)},   // 1
@@ -766,7 +772,7 @@ int WINAPI wWinMain(HINSTANCE module, HINSTANCE, PWSTR pCmdLine, int nCmdShow)
                                            .StrideInBytes = sizeof(Vertex)};
         }
 
-        com_ptr<ID3D12Resource> indexBuffer;
+        ComPtr<ID3D12Resource> indexBuffer;
         {
             constexpr std::array indexData = {0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 4, 5, 1, 4, 1, 0,
                                               3, 2, 6, 3, 6, 7, 1, 5, 6, 1, 6, 2, 4, 0, 3, 4, 3, 7};
@@ -813,8 +819,8 @@ int WINAPI wWinMain(HINSTANCE module, HINSTANCE, PWSTR pCmdLine, int nCmdShow)
             rootSignatureDescription.Desc_1_1 = D3D12_ROOT_SIGNATURE_DESC1{rootParameters.size(), rootParameters.data(),
                                                                            0, nullptr, rootSignatureFlags};
 
-            com_ptr<ID3DBlob> rootSignatureBlob;
-            com_ptr<ID3DBlob> diagnosticBlob;
+            ComPtr<ID3DBlob> rootSignatureBlob;
+            ComPtr<ID3DBlob> diagnosticBlob;
 
             if (S_OK
                 != D3D12SerializeVersionedRootSignature(&rootSignatureDescription, rootSignatureBlob.put(),
@@ -832,9 +838,8 @@ int WINAPI wWinMain(HINSTANCE module, HINSTANCE, PWSTR pCmdLine, int nCmdShow)
                 throw std::runtime_error("Failed to serialize root signature: " + diagnoticMsg);
             }
 
-            app.d3dRes.rootSignature = asComPtr<ID3D12RootSignature>(
-                memberFun<&ID3D12Device::CreateRootSignature>(*app.d3dRes.device), 0,
-                rootSignatureBlob->GetBufferPointer(), rootSignatureBlob->GetBufferSize());
+            app.d3dRes.rootSignature = asComPtr<ID3D12RootSignature, &ID3D12Device::CreateRootSignature>(
+                *app.d3dRes.device, 0, rootSignatureBlob->GetBufferPointer(), rootSignatureBlob->GetBufferSize());
 
             if (!app.d3dRes.rootSignature)
             {
@@ -871,8 +876,8 @@ int WINAPI wWinMain(HINSTANCE module, HINSTANCE, PWSTR pCmdLine, int nCmdShow)
             pipelineStateStream.rtvFormats.value = {.RTFormats{swapChainDesc.Format}, .NumRenderTargets = 1};
 
             D3D12_PIPELINE_STATE_STREAM_DESC pssDesc{sizeof(pipelineStateStream), &pipelineStateStream};
-            app.d3dRes.pipelineState = asComPtr<ID3D12PipelineState>(
-                memberFun<&ID3D12Device2::CreatePipelineState>(*app.d3dRes.device.as<ID3D12Device2>()), &pssDesc);
+            app.d3dRes.pipelineState = asComPtr<ID3D12PipelineState, &ID3D12Device2::CreatePipelineState>(
+                *app.d3dRes.device.as<ID3D12Device2>(), &pssDesc);
 
             if (!app.d3dRes.pipelineState)
             {

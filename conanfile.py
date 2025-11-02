@@ -21,7 +21,7 @@ class slangSandBoxRecipe(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
 
     def requirements(self):
-        self.requires("slangy/0.1.0")
+        self.requires("slangy/0.2.0")
         self.requires("slang/2025.14.3")
 
     def layout(self):
