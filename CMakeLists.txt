@@ -39,4 +39,8 @@ endif()
 
 find_package(slangy REQUIRED QUIET)
 
+if(APPLE)
+   find_package(metal-cpp)
+endif()
+
 add_subdirectory(sandbox)

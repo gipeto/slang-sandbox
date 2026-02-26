@@ -54,8 +54,16 @@ int main(int argc, char* argv[])
 
         SessionDesc sDesc{};
         TargetDesc td{};
+
+#ifdef _WIN32
         td.format = SLANG_DXIL;
-        td.profile = globalSession->findProfile("sm_6_3");
+#elif __APPLE__
+        td.format = SLANG_METAL_LIB;
+#else
+        td.format = SLANG_SPIRV;
+#endif
+
+        td.profile = globalSession->findProfile("");
 
         sDesc.targets = &td;
         sDesc.targetCount = 1;
@@ -63,7 +71,7 @@ int main(int argc, char* argv[])
         auto session = valueOrThrow(makeSession(globalSession, sDesc));
 
         // load the pre-compiled shader_lib module defined in shader_lib.h
-        auto blob = makeFromImpl<IBlob, SlangBlob>(shaders::SHADER_LIB_SLANG_MODULE);
+        auto blob = makeFromImpl<IBlob, SlangBlob>(shaders::SHADER_LIB_SLANG_MODULE::blob);
 
         ComPtr<IModule> libModule;
         libModule.attach(session->loadModuleFromIRBlob("shader_lib", "", blob.get(), DLog("Load shader_lib module")()));
@@ -77,7 +85,7 @@ int main(int argc, char* argv[])
         std::cout << "shader_lib module loaded" << std::endl;
 
         // load the pre-compiled shader_main module defined in shader_main.h
-        auto mainBlob = makeFromImpl<IBlob, SlangBlob>(shaders::SHADER_MAIN_SLANG_MODULE);
+        auto mainBlob = makeFromImpl<IBlob, SlangBlob>(shaders::SHADER_MAIN_SLANG_MODULE::blob);
 
         ComPtr<IModule> mainModule;
         mainModule.attach(

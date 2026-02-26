@@ -646,11 +646,10 @@ int WINAPI wWinMain(HINSTANCE module, HINSTANCE, PWSTR pCmdLine, int nCmdShow)
             };
 
             vertexShader = asID3DBlob(slangy::valueOrThrow(
-                buildShaderProgram(sd, globalSession, std::string("vertex_shader"), std::string("vertexMain"),
-                                   shaders::VERTEX_SHADER_SLANG_MODULE))[0]);
+                buildShaderProgram<shaders::VERTEX_SHADER_SLANG_MODULE>(sd, globalSession, "vertexMain"))[0]);
 
-            pixelShader = asID3DBlob(slangy::valueOrThrow(buildShaderProgram(
-                sd, globalSession, "pixel_shader", "pixelMain", shaders::PIXEL_SHADER_SLANG_MODULE))[0]);
+            pixelShader = asID3DBlob(slangy::valueOrThrow(
+                buildShaderProgram<shaders::PIXEL_SHADER_SLANG_MODULE>(sd, globalSession, "pixelMain"))[0]);
         }
 
         if (vertexShader)

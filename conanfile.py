@@ -3,6 +3,7 @@ import os
 from conan import ConanFile
 from conan.tools.cmake import CMake, cmake_layout
 from conan.tools.files import copy
+from conan.tools.apple import is_apple_os
 
 
 class slangSandBoxRecipe(ConanFile):
@@ -21,21 +22,15 @@ class slangSandBoxRecipe(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
 
     def requirements(self):
-        self.requires("slangy/0.2.0")
-        self.requires("slang/2025.14.3")
+        self.requires("slangy/0.3.0")
+        self.requires("slang/2026.3.1")
+
+        if is_apple_os(self):
+            self.requires("metal-cpp/26")
 
     def layout(self):
         cmake_layout(self)
         self.folders.build = "build"
-
-    def generate(self):
-        for dep in self.dependencies.values():
-            copy(
-                self,
-                "*.dll",
-                dep.cpp_info.bindirs[0],
-                os.path.join(self.build_folder, "install", "bin"),
-            )
 
     def build(self):
         cmake = CMake(self)
